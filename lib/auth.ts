@@ -55,6 +55,10 @@ async function refreshAccessToken(token: any) {
   }
 }
 
+// On Vercel (HTTPS), use secure cookies; on localhost use plain cookies.
+const useSecureCookies = process.env.NEXTAUTH_URL?.startsWith("https://") ?? false;
+const cookiePrefix = useSecureCookies ? "__Secure-" : "";
+
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
@@ -71,6 +75,62 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   session: { strategy: "jwt" },
+  /**
+   * Explicit cookie config fixes the Vercel serverless OAuth redirect-loop.
+   * Without this, the state/CSRF cookie set by one serverless invocation may
+   * not survive the round-trip through Google's redirect on another invocation.
+   */
+  cookies: {
+    sessionToken: {
+      name: `${cookiePrefix}next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
+    callbackUrl: {
+      name: `${cookiePrefix}next-auth.callback-url`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
+    csrfToken: {
+      // CSRF token must stay SameSite=lax (not strict) so it survives
+      // the cross-origin redirect back from Google.
+      name: `next-auth.csrf-token`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+      },
+    },
+    state: {
+      name: `${cookiePrefix}next-auth.state`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        maxAge: 900, // 15 min — long enough to complete the OAuth dance
+      },
+    },
+    pkceCodeVerifier: {
+      name: `${cookiePrefix}next-auth.pkce.code_verifier`,
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: useSecureCookies,
+        maxAge: 900,
+      },
+    },
+  },
   callbacks: {
     async jwt({ token, account }) {
       // Initial sign-in: persist tokens from Google.
