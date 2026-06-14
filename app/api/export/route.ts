@@ -59,55 +59,60 @@ export async function POST(req: NextRequest) {
   const metricList = metrics || DEFAULT_METRICS;
 
   try {
-    // Build a metadata map so the export shows titles, not just IDs.
+    // Fetch channel info first (needed for uploads playlist ID and filename).
     const channels = await listChannels(ctx.accessToken);
     const channel = channelId
       ? channels.find((c) => c.id === channelId)
       : channels[0];
 
-    let metaMap: Map<string, VideoMeta> | undefined;
-    if (channel?.uploadsPlaylistId) {
-      const uploads = await listAllUploads(
-        ctx.accessToken,
-        channel.uploadsPlaylistId,
+    if (scope === "selected" && (!Array.isArray(videoIds) || videoIds.length === 0)) {
+      return NextResponse.json(
+        { error: "videoIds is required when scope is 'selected'." },
+        { status: 400 },
       );
-      metaMap = new Map(uploads.map((v) => [v.id, v]));
     }
 
-    let result;
-    if (scope === "selected") {
-      if (!Array.isArray(videoIds) || videoIds.length === 0) {
-        return NextResponse.json(
-          { error: "videoIds is required when scope is 'selected'." },
-          { status: 400 },
-        );
-      }
-      result = await queryAnalytics(ctx.accessToken, {
-        channelId,
-        startDate,
-        endDate,
-        metrics: metricList,
-        dimensions: "video",
-        filters: `video==${videoIds.join(",")}`,
-        sort: "-views",
-        maxResults: 200,
-      });
-    } else {
-      result = await queryVideoAnalytics(ctx.accessToken, {
-        channelId,
-        startDate,
-        endDate,
-        metrics: metricList,
-      });
-    }
+    // Run all independent fetches in parallel to minimise wall-clock time.
+    const analyticsPromise =
+      scope === "selected"
+        ? queryAnalytics(ctx.accessToken, {
+            channelId,
+            startDate,
+            endDate,
+            metrics: metricList,
+            dimensions: "video",
+            filters: `video==${videoIds.join(",")}`,
+            sort: "-views",
+            maxResults: 200,
+          })
+        : queryVideoAnalytics(ctx.accessToken, {
+            channelId,
+            startDate,
+            endDate,
+            metrics: metricList,
+          });
 
-    // Per-video traffic-source breakdown (one extra query).
-    const trafficSourceMap = await queryTrafficSources(ctx.accessToken, {
+    const trafficPromise = queryTrafficSources(ctx.accessToken, {
       channelId,
       startDate,
       endDate,
       videoIds: scope === "selected" ? videoIds : undefined,
     });
+
+    const uploadsPromise = channel?.uploadsPlaylistId
+      ? listAllUploads(ctx.accessToken, channel.uploadsPlaylistId)
+      : Promise.resolve([] as VideoMeta[]);
+
+    // All three run concurrently — wall-clock time ≈ slowest one, not the sum.
+    const [result, trafficSourceMap, uploads] = await Promise.all([
+      analyticsPromise,
+      trafficPromise,
+      uploadsPromise,
+    ]);
+
+    const metaMap: Map<string, VideoMeta> | undefined = uploads.length
+      ? new Map(uploads.map((v) => [v.id, v]))
+      : undefined;
 
     const studio =
       typeof studioCsv === "string" && studioCsv.trim()

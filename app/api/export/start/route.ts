@@ -55,39 +55,47 @@ export async function POST(req: NextRequest) {
 
   // Fire-and-forget background work. In production this should be a queue or
   // Vercel Workflow so it survives the request lifecycle reliably.
-  void (async () => {
+    void (async () => {
     try {
-      updateJob(job.id, { status: "running", progress: 10 });
+      updateJob(job.id, { status: "running", progress: 5 });
 
       const channels = await listChannels(accessToken);
       const channel = channelId
         ? channels.find((c) => c.id === channelId)
         : channels[0];
 
-      let metaMap: Map<string, VideoMeta> | undefined;
-      if (channel?.uploadsPlaylistId) {
-        const uploads = await listAllUploads(
-          accessToken,
-          channel.uploadsPlaylistId,
-        );
-        metaMap = new Map(uploads.map((v) => [v.id, v]));
-      }
-      updateJob(job.id, { progress: 50 });
+      updateJob(job.id, { progress: 15 });
 
-      const result = await queryVideoAnalytics(accessToken, {
+      // Run all three independent fetches concurrently.
+      const analyticsPromise = queryVideoAnalytics(accessToken, {
         channelId,
         startDate,
         endDate,
         metrics: metricList,
       });
-      updateJob(job.id, { progress: 70 });
 
-      const trafficSourceMap = await queryTrafficSources(accessToken, {
+      const trafficPromise = queryTrafficSources(accessToken, {
         channelId,
         startDate,
         endDate,
       });
+
+      const uploadsPromise = channel?.uploadsPlaylistId
+        ? listAllUploads(accessToken, channel.uploadsPlaylistId)
+        : Promise.resolve([] as VideoMeta[]);
+
+      // Wall-clock time ≈ slowest query, not sum of all three.
+      const [result, trafficSourceMap, uploads] = await Promise.all([
+        analyticsPromise,
+        trafficPromise,
+        uploadsPromise,
+      ]);
+
       updateJob(job.id, { progress: 85 });
+
+      const metaMap: Map<string, VideoMeta> | undefined = uploads.length
+        ? new Map(uploads.map((v) => [v.id, v]))
+        : undefined;
 
       const studio =
         typeof studioCsv === "string" && studioCsv.trim()
