@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background-color: #0e1014;
+  color: #e8eaf0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular figures for all data readouts — the "console" signature. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Thin top accent line used on metric tiles. */
+.accent-rule {
+  position: relative;
+}
+.accent-rule::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 2px;
+  width: 28px;
+  background: var(--rule, #ff5a4d);
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Focus visibility floor. */
+:focus-visible {
+  outline: 2px solid #39d3c3;
+  outline-offset: 2px;
+}
+
+::selection {
+  background: rgba(255, 90, 77, 0.3);
+}
