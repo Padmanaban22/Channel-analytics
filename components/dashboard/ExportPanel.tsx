@@ -75,35 +75,31 @@ export function ExportPanel({
 
   async function exportAll() {
     setBusy("all");
-    setStatus("Starting export…");
+    setStatus("Building export… this may take up to 30 seconds");
     try {
-      const start = await fetch("/api/export/start", {
+      // Use the same direct synchronous route as "Export selected".
+      // The background-job pattern (/api/export/start) doesn't work on Vercel
+      // because serverless functions are terminated after the HTTP response is
+      // sent, killing the in-flight background task before it completes.
+      const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channelId,
           startDate,
           endDate,
+          scope: "all",
           studioCsv: studioCsv || undefined,
         }),
       });
-      const { jobId, error } = await start.json();
-      if (!start.ok) throw new Error(error ?? "Could not start export.");
-
-      for (let i = 0; i < 150; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const s = await fetch(`/api/export/status?jobId=${jobId}`);
-        const job = await s.json();
-        if (job.status === "error") throw new Error(job.error ?? "Export failed.");
-        setStatus(`Building… ${job.progress ?? 0}%`);
-        if (job.ready) {
-          const file = await fetch(`/api/export/status?jobId=${jobId}&download=1`);
-          triggerDownload(await file.blob(), `all-uploads-${startDate}_${endDate}.xlsx`);
-          setStatus("Done.");
-          return;
-        }
-      }
-      throw new Error("Export timed out. Try a shorter date range.");
+      if (!res.ok) throw new Error((await res.json()).error ?? "Export failed.");
+      const filename =
+        res.headers
+          .get("Content-Disposition")
+          ?.match(/filename="(.+?)"/)?.[1] ??
+        `all-uploads-${startDate}_${endDate}.xlsx`;
+      triggerDownload(await res.blob(), filename);
+      setStatus("Done ✓");
     } catch (e: any) {
       setStatus(e.message);
     } finally {
